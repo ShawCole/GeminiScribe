@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Scribe",
+  "description": "Fast and accurate audio transcription powered by Gemini 2.5 Flash. Drag, drop, and get your text in seconds.",
+  "requestFramePermissions": []
+}
