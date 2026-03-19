@@ -16,7 +16,8 @@ export interface AudioMetadata {
 
 export interface QueueItem {
   id: string;
-  file: File;
+  file?: File;
+  fileName: string;
   status: AppStatus;
   progress: number; // 0-100
   timeRemaining: number | null; // estimated seconds remaining
@@ -25,4 +26,14 @@ export interface QueueItem {
   metadata?: AudioMetadata;
   base64?: string; // Cache base64 to avoid re-reading
   startTime?: number;
+}
+
+// Serializable subset for localStorage persistence
+export interface PersistedQueueItem {
+  id: string;
+  fileName: string;
+  status: AppStatus;
+  progress: number;
+  transcript: string;
+  metadata?: AudioMetadata;
 }

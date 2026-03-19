@@ -2,16 +2,51 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Zap, ListMusic, Trash2, Play, Circle, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import FileDropzone from './components/FileDropzone';
 import TranscriptDisplay from './components/TranscriptDisplay';
-import { AppStatus, QueueItem } from './types';
+import { AppStatus, QueueItem, PersistedQueueItem } from './types';
 import { processAudioFile, generateId, formatTime, parseLastTimestamp, normalizeTranscript } from './utils/fileHelpers';
 import { transcribeAudioStream } from './services/geminiService';
+import useLocalStorage from './hooks/useLocalStorage';
+
+const PERSISTABLE_STATUSES = new Set([AppStatus.COMPLETED, AppStatus.ERROR]);
+
+function toPersistedItem(item: QueueItem): PersistedQueueItem {
+  return {
+    id: item.id,
+    fileName: item.fileName,
+    status: item.status,
+    progress: item.progress,
+    transcript: item.transcript,
+    metadata: item.metadata,
+  };
+}
+
+function fromPersistedItem(item: PersistedQueueItem): QueueItem {
+  return {
+    ...item,
+    timeRemaining: null,
+  };
+}
 
 const App: React.FC = () => {
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [persistedQueue, setPersistedQueue] = useLocalStorage<PersistedQueueItem[]>('geminiscribe_queue', []);
+  const [persistedActiveId, setPersistedActiveId] = useLocalStorage<string | null>('geminiscribe_active_item', null);
+
+  const [queue, setQueue] = useState<QueueItem[]>(() => persistedQueue.map(fromPersistedItem));
+  const [activeItemId, setActiveItemId] = useState<string | null>(persistedActiveId);
   
   // Ref to track if we are currently processing a file to prevent overlapping
   const isProcessingRef = useRef(false);
+
+  // Sync completed/error items to localStorage
+  useEffect(() => {
+    const toPersist = queue.filter(item => PERSISTABLE_STATUSES.has(item.status)).map(toPersistedItem);
+    setPersistedQueue(toPersist);
+  }, [queue]);
+
+  // Sync active item selection to localStorage
+  useEffect(() => {
+    setPersistedActiveId(activeItemId);
+  }, [activeItemId]);
 
   // Helper to update a specific item in the queue
   const updateQueueItem = (id: string, updates: Partial<QueueItem>) => {
@@ -22,6 +57,7 @@ const App: React.FC = () => {
     const newItems: QueueItem[] = files.map(file => ({
       id: generateId(),
       file,
+      fileName: file.name,
       status: AppStatus.QUEUED,
       progress: 0,
       timeRemaining: null,
@@ -66,18 +102,18 @@ const App: React.FC = () => {
       let duration = item.metadata?.duration || 0;
 
       if (!base64) {
-        const result = await processAudioFile(item.file, (percent) => {
+        const result = await processAudioFile(item.file!, (percent) => {
           updateQueueItem(item.id, { progress: percent / 2 });
         });
         base64 = result.base64;
         duration = result.duration;
         
-        updateQueueItem(item.id, { 
+        updateQueueItem(item.id, {
            base64,
-           metadata: { 
-             name: item.file.name,
-             size: item.file.size,
-             type: item.file.type,
+           metadata: {
+             name: item.fileName,
+             size: item.file!.size,
+             type: item.file!.type,
              duration
            }
         });
@@ -94,7 +130,7 @@ const App: React.FC = () => {
       let localTranscript = "";
 
       // Streaming call
-      await transcribeAudioStream(base64!, item.file.type, (chunk) => {
+      await transcribeAudioStream(base64!, item.file!.type, (chunk) => {
         localTranscript += chunk;
         
         // --- DETERMINISTIC FIX ---
@@ -223,7 +259,7 @@ const App: React.FC = () => {
                                 `}
                             >
                                 <div className="flex justify-between items-start mb-2">
-                                    <h4 className="font-medium text-sm text-slate-200 truncate pr-6">{item.file.name}</h4>
+                                    <h4 className="font-medium text-sm text-slate-200 truncate pr-6">{item.fileName}</h4>
                                     <button 
                                         onClick={(e) => handleDeleteItem(item.id, e)}
                                         className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 transition-opacity absolute top-2 right-2"
@@ -285,7 +321,7 @@ const App: React.FC = () => {
                          </div>
                     ) : (
                         <TranscriptDisplay 
-                            fileName={selectedItem.file.name}
+                            fileName={selectedItem.fileName}
                             transcript={selectedItem.transcript}
                             status={selectedItem.status}
                             onChange={(newText) => updateQueueItem(selectedItem.id, { transcript: newText })}
